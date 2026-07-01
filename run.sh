@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Usage: ./run.sh [paint|torus|linux] [vmm args...]
+# Usage: ./run.sh [hello|paint|torus|linux] [vmm args...]
 #   ./run.sh linux programs/hello
 BIN=torus
 if [[ $# -gt 0 && $1 != -* ]]; then
