@@ -238,8 +238,11 @@ extern "C" fn _start() -> ! {
                 } else {
                     rgb(shade * 0.85, shade * 0.82, shade * 0.78)
                 };
-                fill_triangle(fb, zb, [projected[quad[0]], projected[quad[2]], projected[quad[1]]], color);
-                fill_triangle(fb, zb, [projected[quad[2]], projected[quad[3]], projected[quad[1]]], color);
+                // This order makes outward faces come out with positive
+                // signed area after projection (the screen y-flip mirrors
+                // orientation once; the u,v surface basis mirrors it back).
+                fill_triangle(fb, zb, [projected[quad[0]], projected[quad[1]], projected[quad[2]]], color);
+                fill_triangle(fb, zb, [projected[quad[2]], projected[quad[1]], projected[quad[3]]], color);
             }
         }
 
