@@ -4,11 +4,15 @@
 //!
 //! ```text
 //! 0x0000_1000  page tables (3 pages, written by the VMM)
-//! 0x001f_0000  stack top (grows down)
+//! 0x001f_0000  kernel stack top (grows down)
 //! 0x0020_0000  kernel image (ELF load address)
+//! 0x0040_0000  Linux program load region + brk heap (linux kernel only)
 //! 0x00f0_0000  SharedState mailbox (host writes while guest is parked)
 //! 0x0100_0000  framebuffer, 640x480 0RGB u32 (guest writes, host blits)
-//! 0x0180_0000  guest scratch (paint canvas)
+//! 0x0180_0000  guest scratch (paint canvas, torus z-buffer, syscall stack)
+//! 0x0200_0000  Linux program ELF image (u64 length, bytes at +16)
+//! 0x0280_0000  mmap arena (linux kernel only)
+//! 0x0300_0000  Linux program stack top (grows down)
 //! ```
 
 #![no_std]
@@ -25,6 +29,10 @@ pub const FB_HEIGHT: usize = 480;
 
 /// Demo-owned scratch region (paint canvas, z-buffer, ...).
 pub const SCRATCH_ADDR: u64 = 0x0180_0000;
+
+/// The VMM copies the Linux program's ELF file here: u64 byte length,
+/// then the raw file at +16.
+pub const PROGRAM_ADDR: u64 = 0x0200_0000;
 
 pub const STATE_ADDR: u64 = 0x00f0_0000;
 pub const MAX_EVENTS: usize = 256;

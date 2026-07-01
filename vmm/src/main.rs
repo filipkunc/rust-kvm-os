@@ -9,7 +9,8 @@ use kvm_ioctls::{Kvm, VcpuExit, VcpuFd};
 use object::{Object, ObjectSegment};
 use shared::{
     ABS_X, ABS_Y, BTN_LEFT, EV_ABS, EV_KEY, EV_REL, EXIT_PORT, FB_ADDR, FB_HEIGHT, FB_WIDTH,
-    FRAME_PORT, InputEvent, MAX_EVENTS, REL_WHEEL, SERIAL_PORT, STATE_ADDR, SharedState,
+    FRAME_PORT, InputEvent, MAX_EVENTS, PROGRAM_ADDR, REL_WHEEL, SERIAL_PORT, STATE_ADDR,
+    SharedState,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -167,7 +168,15 @@ fn task_segment() -> kvm_segment {
     }
 }
 
-fn setup_vcpu(vcpu: &mut VcpuFd, entry: u64) {
+fn setup_vcpu(kvm: &Kvm, vcpu: &mut VcpuFd, entry: u64) {
+    // Give the guest the host's CPUID. Without a CPUID table KVM treats
+    // every feature as absent — and rejects e.g. EFER.SCE (the syscall
+    // instruction) as a reserved bit, which triple-faults the guest.
+    let cpuid = kvm
+        .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
+        .expect("get_supported_cpuid");
+    vcpu.set_cpuid2(&cpuid).expect("set_cpuid2");
+
     // The whole "boot process": start the vCPU already in 64-bit long mode
     // with paging and SSE enabled. There is no firmware and no bootloader;
     // this struct is everything the guest inherits.
@@ -399,14 +408,19 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    const USAGE: &str = "usage: vmm <kernel-elf> [linux-program-elf] [--dump-frames N]";
+    let mut positional = Vec::new();
+    let mut dump_after = None;
     let mut args = std::env::args().skip(1);
-    let kernel_path = args.next().expect("usage: vmm <kernel-elf> [--dump-frames N]");
-    let dump_after = match args.next().as_deref() {
-        Some("--dump-frames") => {
-            Some(args.next().expect("--dump-frames needs a count").parse().unwrap())
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--dump-frames" => {
+                dump_after = Some(args.next().expect(USAGE).parse().expect(USAGE));
+            }
+            _ => positional.push(arg),
         }
-        _ => None,
-    };
+    }
+    let kernel_path = positional.first().expect(USAGE).clone();
 
     let kvm = Kvm::new().expect("opening /dev/kvm");
     let vm = kvm.create_vm().expect("creating VM");
@@ -424,9 +438,15 @@ fn main() {
 
     write_page_tables(&mem);
     let entry = load_kernel(&mem, &kernel_path);
+    if let Some(program_path) = positional.get(1) {
+        // The guest kernel's ELF loader takes it from here.
+        let image = std::fs::read(program_path).unwrap_or_else(|e| panic!("reading {program_path}: {e}"));
+        mem.write_u64(PROGRAM_ADDR, image.len() as u64);
+        mem.write_bytes(PROGRAM_ADDR + 16, &image);
+    }
 
     let mut vcpu = vm.create_vcpu(0).expect("creating vCPU");
-    setup_vcpu(&mut vcpu, entry);
+    setup_vcpu(&kvm, &mut vcpu, entry);
 
     let event_loop = EventLoop::with_user_event().build().expect("creating event loop");
     let gate = Arc::new(Gate { parked: Mutex::new(false), released: Condvar::new() });
