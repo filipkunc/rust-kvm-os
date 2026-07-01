@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 libm = "0.2.16"
+shared = { path = "../shared" }
 
 [profile.release]
 panic = "abort"

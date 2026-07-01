@@ -8,3 +8,6 @@ kvm-ioctls = "0.25"
 kvm-bindings = "0.14"
 object = { version = "0.39", default-features = false, features = ["read_core", "elf", "std"] }
 libc = "0.2"
+shared = { path = "../shared" }
+winit = "0.30"
+softbuffer = "0.4.8"
