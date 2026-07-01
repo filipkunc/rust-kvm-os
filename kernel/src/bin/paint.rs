@@ -1,51 +1,18 @@
 #![no_std]
 #![no_main]
 
-use core::arch::asm;
 use core::fmt::Write;
 
+use kernel::{Serial, fb, frame_done, read_state};
 use shared::{
-    ABS_X, ABS_Y, BTN_LEFT, CANVAS_ADDR, EV_ABS, EV_KEY, EXIT_PORT, FB_ADDR, FB_HEIGHT, FB_WIDTH,
-    FRAME_PORT, KEY_C, KEY_SPACE, SERIAL_PORT, STATE_ADDR, SharedState,
+    ABS_X, ABS_Y, BTN_LEFT, EV_ABS, EV_KEY, FB_HEIGHT, FB_WIDTH, KEY_C, KEY_SPACE, SCRATCH_ADDR,
 };
 
 const W: i32 = FB_WIDTH as i32;
 const H: i32 = FB_HEIGHT as i32;
 
-fn outb(port: u16, value: u8) {
-    unsafe {
-        asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack, preserves_flags));
-    }
-}
-
-struct Serial;
-
-impl Write for Serial {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for byte in s.bytes() {
-            outb(SERIAL_PORT, byte);
-        }
-        Ok(())
-    }
-}
-
-fn exit(code: u8) -> ! {
-    outb(EXIT_PORT, code);
-    loop {
-        unsafe { asm!("hlt") };
-    }
-}
-
-fn fb() -> &'static mut [u32] {
-    unsafe { core::slice::from_raw_parts_mut(FB_ADDR as *mut u32, FB_WIDTH * FB_HEIGHT) }
-}
-
 fn canvas() -> &'static mut [u32] {
-    unsafe { core::slice::from_raw_parts_mut(CANVAS_ADDR as *mut u32, FB_WIDTH * FB_HEIGHT) }
-}
-
-fn read_state() -> SharedState {
-    unsafe { core::ptr::read_volatile(STATE_ADDR as *const SharedState) }
+    unsafe { core::slice::from_raw_parts_mut(SCRATCH_ADDR as *mut u32, FB_WIDTH * FB_HEIGHT) }
 }
 
 fn rgb(r: f32, g: f32, b: f32) -> u32 {
@@ -153,12 +120,6 @@ extern "C" fn _start() -> ! {
         let pulse = 0.7 + 0.3 * libm::sinf(t * 5.0);
         crosshair(fb(), mouse.0, mouse.1, rgb(pulse, pulse, pulse));
 
-        outb(FRAME_PORT, 0);
+        frame_done();
     }
-}
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    let _ = writeln!(Serial, "panic: {info}");
-    exit(1)
 }

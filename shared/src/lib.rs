@@ -23,7 +23,8 @@ pub const FB_ADDR: u64 = 0x0100_0000;
 pub const FB_WIDTH: usize = 640;
 pub const FB_HEIGHT: usize = 480;
 
-pub const CANVAS_ADDR: u64 = 0x0180_0000;
+/// Demo-owned scratch region (paint canvas, z-buffer, ...).
+pub const SCRATCH_ADDR: u64 = 0x0180_0000;
 
 pub const STATE_ADDR: u64 = 0x00f0_0000;
 pub const MAX_EVENTS: usize = 256;
@@ -31,9 +32,12 @@ pub const MAX_EVENTS: usize = 256;
 // Input events use the evdev/virtio-input shape: {type, code, value}.
 // Codes are real Linux evdev codes (winit hands them to the VMM as-is).
 pub const EV_KEY: u16 = 0x01;
+pub const EV_REL: u16 = 0x02;
 pub const EV_ABS: u16 = 0x03;
 pub const ABS_X: u16 = 0x00;
 pub const ABS_Y: u16 = 0x01;
+/// Wheel steps; the value is an i32 stored in the u32.
+pub const REL_WHEEL: u16 = 0x08;
 pub const BTN_LEFT: u16 = 0x110;
 pub const KEY_SPACE: u16 = 57;
 pub const KEY_C: u16 = 46;

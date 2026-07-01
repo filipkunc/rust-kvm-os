@@ -8,12 +8,12 @@ use kvm_bindings::{kvm_segment, kvm_userspace_memory_region};
 use kvm_ioctls::{Kvm, VcpuExit, VcpuFd};
 use object::{Object, ObjectSegment};
 use shared::{
-    ABS_X, ABS_Y, BTN_LEFT, EV_ABS, EV_KEY, EXIT_PORT, FB_ADDR, FB_HEIGHT, FB_WIDTH, FRAME_PORT,
-    InputEvent, MAX_EVENTS, SERIAL_PORT, STATE_ADDR, SharedState,
+    ABS_X, ABS_Y, BTN_LEFT, EV_ABS, EV_KEY, EV_REL, EXIT_PORT, FB_ADDR, FB_HEIGHT, FB_WIDTH,
+    FRAME_PORT, InputEvent, MAX_EVENTS, REL_WHEEL, SERIAL_PORT, STATE_ADDR, SharedState,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 use winit::window::{Window, WindowId};
@@ -188,7 +188,11 @@ fn setup_vcpu(vcpu: &mut VcpuFd, entry: u64) {
 
     let mut regs = vcpu.get_regs().expect("get_regs");
     regs.rip = entry;
-    regs.rsp = STACK_TOP;
+    // The SysV ABI puts rsp at 8 mod 16 on function entry (the call pushed a
+    // return address). _start is compiled as a normal function, so entering
+    // with a 16-aligned rsp makes every movaps spill misaligned: #GP, and
+    // with no IDT, a triple fault.
+    regs.rsp = STACK_TOP - 8;
     regs.rflags = 0x2; // bit 1 is reserved-must-be-one; interrupts stay off
     vcpu.set_regs(&regs).expect("set_regs");
 }
@@ -362,6 +366,15 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
                 self.push(EV_KEY, BTN_LEFT, (state == ElementState::Pressed) as u32);
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let steps = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y as i32,
+                    MouseScrollDelta::PixelDelta(p) => (p.y / 40.0) as i32,
+                };
+                if steps != 0 {
+                    self.push(EV_REL, REL_WHEEL, steps as u32);
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } if !event.repeat => {
                 if let Some(scancode) = event.physical_key.to_scancode() {
                     let pressed = (event.state == ElementState::Pressed) as u32;
@@ -370,11 +383,15 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 self.blit();
-                self.release_guest();
-                if self.dump_after.is_some_and(|n| self.frame >= n) {
+                // Dump while the guest is still parked: after release_guest()
+                // it is already clearing and drawing the next frame, and the
+                // dump would capture a torn mid-render framebuffer.
+                let guest_parked = *self.gate.parked.lock().unwrap();
+                if guest_parked && self.dump_after.is_some_and(|n| self.frame + 1 >= n) {
                     self.dump_ppm("/tmp/rust-kvm-os-frame.ppm");
                     std::process::exit(0);
                 }
+                self.release_guest();
             }
             _ => {}
         }
