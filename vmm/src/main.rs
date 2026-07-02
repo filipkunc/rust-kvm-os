@@ -270,6 +270,7 @@ struct App {
     frame: u64,
     redraw_requested_early: bool,
     dump_after: Option<u64>,
+    record: Option<(u64, String)>,
 }
 
 impl App {
@@ -310,9 +311,15 @@ impl App {
             return;
         }
         self.frame += 1;
+        let time_ns = match self.record {
+            // Deterministic time while recording, so a full revolution of the
+            // torus loops seamlessly regardless of wall-clock jitter.
+            Some(_) => self.frame * 16_666_667,
+            None => self.start.elapsed().as_nanos() as u64,
+        };
         let mut state = SharedState {
             frame: self.frame,
-            time_ns: self.start.elapsed().as_nanos() as u64,
+            time_ns,
             event_count: self.pending.len() as u32,
             _pad: 0,
             events: [InputEvent { kind: 0, code: 0, value: 0 }; MAX_EVENTS],
@@ -400,6 +407,12 @@ impl ApplicationHandler for App {
                     self.dump_ppm("/tmp/rust-kvm-os-frame.ppm");
                     std::process::exit(0);
                 }
+                if guest_parked && let Some((count, dir)) = &self.record {
+                    self.dump_ppm(&format!("{dir}/frame-{:04}.ppm", self.frame + 1));
+                    if self.frame + 1 >= *count {
+                        std::process::exit(0);
+                    }
+                }
                 self.release_guest();
             }
             _ => {}
@@ -408,14 +421,22 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    const USAGE: &str = "usage: vmm <kernel-elf> [linux-program-elf] [--dump-frames N]";
+    const USAGE: &str =
+        "usage: vmm <kernel-elf> [linux-program-elf] [--dump-frames N] [--record N DIR]";
     let mut positional = Vec::new();
     let mut dump_after = None;
+    let mut record = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dump-frames" => {
                 dump_after = Some(args.next().expect(USAGE).parse().expect(USAGE));
+            }
+            "--record" => {
+                let count = args.next().expect(USAGE).parse().expect(USAGE);
+                let dir = args.next().expect(USAGE);
+                std::fs::create_dir_all(&dir).expect("creating recording dir");
+                record = Some((count, dir));
             }
             _ => positional.push(arg),
         }
@@ -466,6 +487,7 @@ fn main() {
         frame: 0,
         redraw_requested_early: false,
         dump_after,
+        record,
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
